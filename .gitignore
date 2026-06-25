@@ -1,0 +1,12 @@
+node_modules
+dist
+web-ext-artifacts
+coverage
+.vscode
+.idea
+*.log
+.DS_Store
+.env
+
+.claude/
+.claude/plans/

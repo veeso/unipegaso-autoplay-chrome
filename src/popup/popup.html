@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unipegaso AutoPlay</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Unipegaso AutoPlay</h1>
+      </header>
+
+      <section class="status" aria-live="polite">
+        <span class="dot" id="status-dot" aria-hidden="true"></span>
+        <span class="status-text">
+          <span id="status-label">Caricamento…</span>
+          <span class="status-sep" aria-hidden="true"> — </span>
+          <span id="status-description" class="status-description"></span>
+        </span>
+      </section>
+
+      <section class="toggle-row">
+        <label class="switch" for="toggle">
+          <span class="switch-label">Avanzamento automatico</span>
+          <input type="checkbox" id="toggle" />
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </section>
+
+      <section class="toggle-row">
+        <label class="switch" for="fast">
+          <span class="switch-label">
+            Avanzamento veloce
+            <small class="switch-sub"
+              >Passa alla lezione successiva appena il progresso arriva al 100% senza attendere la
+              fine del video.</small
+            >
+          </span>
+          <input type="checkbox" id="fast" />
+          <span class="slider" aria-hidden="true"></span>
+        </label>
+      </section>
+
+      <section class="hint">
+        <p>
+          Attivo su
+          <code>lms.pegaso.multiversity.click/videolezioni/&lt;corso&gt;/&lt;indice&gt;</code>.
+        </p>
+        <p>
+          Passa alla prossima lezione dopo 3&nbsp;secondi quando quella corrente raggiunge il 100%.
+        </p>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
