@@ -1,19 +1,29 @@
 import type { LessonItem, LessonPage } from './types.js';
 
+/** Options mirrored from the user's extension settings. */
+export interface NavigatorOptions {
+  /** Mirror of ExtensionSettings.autoTest. */
+  autoTest?: boolean;
+}
+
 /** Decision returned by {@link decide}. */
 export type Decision =
   | { action: 'wait'; reason: string }
   | { action: 'advance'; target: LessonItem; currentIndex: number }
-  | { action: 'expand'; reason: string };
+  | { action: 'expand'; reason: string }
+  | { action: 'run-test'; current: LessonItem; currentIndex: number };
 
 /** Pure selector: which item, if any, should we move to after the current one? */
-export const findNextTarget = (page: LessonPage, fromIndex: number): LessonItem | null => {
+export const findNextTarget = (
+  page: LessonPage,
+  fromIndex: number,
+  options: NavigatorOptions = {},
+): LessonItem | null => {
   for (let i = fromIndex + 1; i < page.items.length; i += 1) {
     const item = page.items[i]!;
-    if (item.skip) continue;
-    if (item.status === 'done') continue;
-    if (item.kind !== 'video' && item.kind !== 'obiettivi') continue;
-    return item;
+    if (item.status === 'done' || item.completed) continue;
+    if (item.kind === 'video' || item.kind === 'obiettivi') return item;
+    if (item.kind === 'test' && (options.autoTest ?? false)) return item;
   }
   return null;
 };
@@ -26,7 +36,7 @@ const findCurrentIndex = (page: LessonPage): number => page.items.findIndex((it)
  * The decision is pure — callers (content script) are responsible for timing
  * and DOM side effects.
  */
-export const decide = (page: LessonPage): Decision => {
+export const decide = (page: LessonPage, options: NavigatorOptions = {}): Decision => {
   const currentIndex = findCurrentIndex(page);
   if (currentIndex === -1) {
     // No row flagged as current yet — nothing to do until the UI settles.
@@ -34,8 +44,18 @@ export const decide = (page: LessonPage): Decision => {
   }
 
   const current = page.items[currentIndex]!;
-  const target = findNextTarget(page, currentIndex);
+  const target = findNextTarget(page, currentIndex, options);
   const hasCollapsed = page.accordions.some((a) => !a.expanded);
+
+  if (current.kind === 'test' && !current.completed) {
+    if (options.autoTest ?? false) {
+      // The quiz state machine in content.ts owns opening, answering and
+      // submitting; it also advances afterwards.
+      return { action: 'run-test', current, currentIndex };
+    }
+    // The user opened the test by hand — never navigate away from it.
+    return { action: 'wait', reason: 'test-open-manual' };
+  }
 
   if (current.kind === 'video') {
     if (current.percentage === null) {
@@ -52,8 +72,9 @@ export const decide = (page: LessonPage): Decision => {
     }
   }
 
-  // At this point the current row is either a completed video or an Obiettivi
-  // row we've been sitting on long enough for the caller's dwell timer.
+  // At this point the current row is a completed video, a completed test, or
+  // an Obiettivi row we've been sitting on long enough for the caller's dwell
+  // timer.
   if (target) {
     return { action: 'advance', target, currentIndex };
   }

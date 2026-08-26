@@ -1,6 +1,6 @@
 {
   "name": "unipegaso-autoplay-chrome",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chrome extension that automatically skips to the next lesson on Unipegaso video lesson pages when the current one is completed.",
   "private": true,
   "author": "Christian Visintin <christian.visintin@veeso.dev>",

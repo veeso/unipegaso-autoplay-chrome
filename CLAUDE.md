@@ -38,20 +38,31 @@ differs:
 2. **Completion.** A video row is done when its `.w-1/12` percentage cell shows
    `100%`. Once the _current_ row reaches 100%, wait
    `NAVIGATION_DELAY_MS` (3 s) and click the first following row that is:
-   - not `Test di fine lezione`
+   - not `Test di fine lezione` (unless the `autoTest` setting is on and the
+     test is not already passed — then it becomes the target)
    - not `Dispensa`
    - not already done
 3. **Obiettivi rows.** Click them if not completed. They have no percentage —
    dwell on them for `OBIETTIVI_DWELL_MS` (3 s) and then advance to the next
    lesson.
-4. **Accordion expansion.** Only expand accordions inside the currently-active
+4. **Test di fine lezione.** Off by default; when the `autoTest` setting is
+   on, the extension clicks the row's `Esegui` button, answers every quiz
+   question at random, waits 2 s (`TEST_ANSWER_SETTLE_MS`), presses the
+   `Invia` button that appears once all answers are selected, waits 3 s
+   (`TEST_SUBMIT_DELAY_MS`), then advances to the next row. Quiz DOM parsing
+   lives in `lib/quiz.ts` (pure); the state machine lives in `content.ts`.
+   A stalled quiz (nothing rendered / no `Invia` within 30 s) is skipped. When
+   a test row is opened manually and `autoTest` is off (or the row isn't a
+   navigation target), the extension waits and never navigates away from it
+   while it stays current and incomplete.
+5. **Accordion expansion.** Only expand accordions inside the currently-active
    module (wrapped by `.bg-platform-light-gray`). Never click a _grey_ module
    (different from the active one) — doing so collapses the current module and
    breaks the flow.
-5. **Toggle.** Users enable/disable auto-advance from the popup. Setting lives
+6. **Toggle.** Users enable/disable auto-advance from the popup. Setting lives
    in `chrome.storage.sync` under `unipegaso-autoplay:settings`. The content
    script reacts to changes via `storage.onChanged`.
-6. **Notifications.** The content script asks the service worker to fire a
+7. **Notifications.** The content script asks the service worker to fire a
    `chrome.notifications` entry when: listening starts, paused, or a lesson
    transition fires.
 
@@ -67,15 +78,18 @@ src/
     types.ts            Shared types + constants
     dom.ts              Pure DOM parsing (scanPage, getRowElement, …)
     navigator.ts        Pure decision logic (decide, findNextTarget)
+    quiz.ts             Pure quiz-page parsing (scanQuiz, findInviaButton, …)
     storage.ts          Settings load/save/watch helpers
   icons/                PNG icons (48 / 96 / 128)
 scripts/build.mjs       esbuild bundler (entries: content, background, popup)
 test/
   fixtures/
     lesson-tree.html    Trimmed DOM snapshot of a real lesson page
+    quiz-page.html      Trimmed DOM snapshot of a quiz page
     synthetic.ts        Factory helpers for unit tests
   dom.test.ts           Snapshot + structural tests against the real fixture
   navigator.test.ts     Unit tests for the pure decision logic
+  quiz.test.ts          Unit tests for quiz DOM parsing
 ```
 
 ## Commands

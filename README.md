@@ -23,7 +23,10 @@ This is the Chrome port of the
    next lesson that is still red (not completed).
 3. `Obiettivi` rows are opened and then skipped after a 3 second dwell (they
    carry no percentage of their own).
-4. `Test di fine lezione` and `Dispensa` rows are always ignored.
+4. `Test di fine lezione` rows are ignored by default; an opt-in popup
+   toggle answers them with random choices and submits them automatically.
+   If you open a test manually while the toggle is off, the extension waits
+   and never navigates away from it. `Dispensa` rows are always ignored.
 5. When the last lesson of a visible chapter is done, the next collapsed
    chapter **inside the same module** is expanded — grey chapters from other
    modules are left alone, because opening them collapses the active module.

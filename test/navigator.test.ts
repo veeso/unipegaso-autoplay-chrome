@@ -54,6 +54,61 @@ describe('findNextTarget', () => {
     const next = findNextTarget(page, 1);
     expect(next).toBeNull();
   });
+
+  it('targets a todo test row when autoTest is on', () => {
+    const page = makePage([
+      makeItem({
+        title: 'v1',
+        percentage: 100,
+        status: 'current',
+        isCurrent: true,
+        completed: true,
+      }),
+      makeItem({ title: 'Test di fine lezione', kind: 'test', skip: true, percentage: null }),
+      makeItem({ title: 'Obiettivi', kind: 'obiettivi', percentage: null, status: 'todo' }),
+    ]);
+    const next = findNextTarget(page, 0, { autoTest: true });
+    expect(next?.title).toBe('Test di fine lezione');
+  });
+
+  it('skips completed test rows even when autoTest is on', () => {
+    const page = makePage([
+      makeItem({
+        title: 'v1',
+        percentage: 100,
+        status: 'current',
+        isCurrent: true,
+        completed: true,
+      }),
+      makeItem({
+        title: 'Test di fine lezione',
+        kind: 'test',
+        skip: true,
+        percentage: null,
+        status: 'done',
+        completed: true,
+      }),
+      makeItem({ title: 'Obiettivi', kind: 'obiettivi', percentage: null, status: 'todo' }),
+    ]);
+    const next = findNextTarget(page, 0, { autoTest: true });
+    expect(next?.title).toBe('Obiettivi');
+  });
+
+  it('keeps ignoring test rows when autoTest is off', () => {
+    const page = makePage([
+      makeItem({
+        title: 'v1',
+        percentage: 100,
+        status: 'current',
+        isCurrent: true,
+        completed: true,
+      }),
+      makeItem({ title: 'Test di fine lezione', kind: 'test', skip: true, percentage: null }),
+      makeItem({ title: 'Obiettivi', kind: 'obiettivi', percentage: null, status: 'todo' }),
+    ]);
+    const next = findNextTarget(page, 0);
+    expect(next?.title).toBe('Obiettivi');
+  });
 });
 
 describe('decide', () => {
@@ -129,5 +184,60 @@ describe('decide', () => {
     const d = decide(page);
     expect(d.action).toBe('wait');
     if (d.action === 'wait') expect(d.reason).toBe('no-current-row');
+  });
+});
+
+describe('decide with autoTest', () => {
+  it('returns run-test when the current row is an uncompleted test', () => {
+    const page = makePage([
+      makeItem({ title: 'v1', percentage: 100, status: 'done', completed: true }),
+      makeItem({
+        title: 'Test di fine lezione',
+        kind: 'test',
+        skip: true,
+        percentage: null,
+        status: 'current',
+        isCurrent: true,
+      }),
+      makeItem({ title: 'Obiettivi', kind: 'obiettivi', percentage: null, status: 'todo' }),
+    ]);
+    const d = decide(page, { autoTest: true });
+    expect(d.action).toBe('run-test');
+    if (d.action === 'run-test') expect(d.current.title).toBe('Test di fine lezione');
+  });
+
+  it('waits on a manually opened test when autoTest is off', () => {
+    const page = makePage([
+      makeItem({
+        title: 'Test di fine lezione',
+        kind: 'test',
+        skip: true,
+        percentage: null,
+        status: 'current',
+        isCurrent: true,
+      }),
+      makeItem({ title: 'Obiettivi', kind: 'obiettivi', percentage: null, status: 'todo' }),
+    ]);
+    const d = decide(page);
+    expect(d.action).toBe('wait');
+    if (d.action === 'wait') expect(d.reason).toBe('test-open-manual');
+  });
+
+  it('advances past a completed current test row', () => {
+    const page = makePage([
+      makeItem({
+        title: 'Test di fine lezione',
+        kind: 'test',
+        skip: true,
+        percentage: null,
+        status: 'current',
+        isCurrent: true,
+        completed: true,
+      }),
+      makeItem({ title: 'Obiettivi', kind: 'obiettivi', percentage: null, status: 'todo' }),
+    ]);
+    const d = decide(page, { autoTest: true });
+    expect(d.action).toBe('advance');
+    if (d.action === 'advance') expect(d.target.title).toBe('Obiettivi');
   });
 });

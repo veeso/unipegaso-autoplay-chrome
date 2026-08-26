@@ -29,6 +29,7 @@ describe('scanPage', () => {
         kind: i.kind,
         percentage: i.percentage,
         status: i.status,
+        completed: i.completed,
         isCurrent: i.isCurrent,
         skip: i.skip,
         clickable: i.clickable,
@@ -66,6 +67,20 @@ describe('scanPage', () => {
     const page = scanPage(doc);
     const completed = page.items.filter((i) => i.kind === 'video' && i.percentage === 100);
     for (const row of completed) expect(['done', 'current']).toContain(row.status);
+  });
+
+  it('derives completed independently of the current-row flag', () => {
+    const doc = loadFixture();
+    const page = scanPage(doc);
+    for (const item of page.items) {
+      expect(typeof item.completed).toBe('boolean');
+      if (item.kind === 'video' && item.percentage === 100) {
+        expect(item.completed).toBe(true);
+      }
+      if (item.kind === 'video' && item.percentage !== null && item.percentage < 100) {
+        expect(item.completed).toBe(false);
+      }
+    }
   });
 });
 

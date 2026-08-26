@@ -4,3 +4,4 @@ web-ext-artifacts
 test/fixtures/*.html
 coverage
 *.min.js
+.superpowers
