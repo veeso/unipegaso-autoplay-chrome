@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Unipegaso AutoPlay",
   "short_name": "unipegaso-autoplay",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Passa automaticamente alla lezione successiva sulle pagine videolezioni di Unipegaso quando quella corrente è completata.",
   "icons": {
     "48": "icons/icon-48.png",
