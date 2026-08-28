@@ -125,6 +125,7 @@ const parseRow = (row: Element, accordionTitle: string, index: number): LessonIt
   const green = hasGreenBadge(row);
   const current = isCurrentRow(row);
   const status = deriveStatus(kind, percentage, fill, green, current);
+  const completed = percentage === 100 || green || fill === GREEN_FILL;
   const skip = kind === 'test' || kind === 'dispensa';
   const clickable = isClickable(row);
   return {
@@ -132,6 +133,7 @@ const parseRow = (row: Element, accordionTitle: string, index: number): LessonIt
     kind,
     percentage,
     status,
+    completed,
     isCurrent: current,
     skip,
     clickable,

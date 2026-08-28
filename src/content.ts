@@ -1,11 +1,16 @@
 import { findCollapsedLessonAccordions, getRowElement, scanPage } from './lib/dom.js';
 import { decide, findNextTarget } from './lib/navigator.js';
+import { findInviaButton, getQuizAnswerElement, getTestRunButton, scanQuiz } from './lib/quiz.js';
 import { loadSettings, watchSettings } from './lib/storage.js';
 import {
   LESSON_URL_PATTERN,
   NAVIGATION_DELAY_MS,
   OBIETTIVI_DWELL_MS,
+  TEST_ANSWER_SETTLE_MS,
+  TEST_SUBMIT_DELAY_MS,
   type ExtensionSettings,
+  type LessonItem,
+  type LessonPage,
 } from './lib/types.js';
 
 const LOG_PREFIX = '[unipegaso-autoplay]';
@@ -35,6 +40,15 @@ const logOnChange = (payload: TickLog): void => {
   console.info(LOG_PREFIX, 'tick', payload);
 };
 
+interface QuizRunState {
+  /** Identity of the test row this run belongs to. */
+  key: string;
+  phase: 'answering' | 'awaiting-invia' | 'submitted';
+  startedAt: number;
+  answeredAt: number | null;
+  submittedAt: number | null;
+}
+
 interface ControllerState {
   settings: ExtensionSettings;
   pendingTimer: number | null;
@@ -42,15 +56,17 @@ interface ControllerState {
   lastObiettiviTitle: string | null;
   obiettiviFirstSeenAt: number | null;
   lastExpandAt: number;
+  quizRun: QuizRunState | null;
 }
 
 const state: ControllerState = {
-  settings: { enabled: true, fastAdvance: false },
+  settings: { enabled: true, fastAdvance: false, autoTest: false },
   pendingTimer: null,
   lastTargetIndex: null,
   lastObiettiviTitle: null,
   obiettiviFirstSeenAt: null,
   lastExpandAt: 0,
+  quizRun: null,
 };
 
 /** Minimum time between accordion-expand clicks so we don't toggle them. */
@@ -62,6 +78,8 @@ const EXPAND_POLL_TIMEOUT_MS = 15000;
 /** Window after a sidebar click during which we retry calling video.play(). */
 const AUTOPLAY_ATTEMPT_WINDOW_MS = 8000;
 const AUTOPLAY_ATTEMPT_INTERVAL_MS = 500;
+/** Give up on a quiz that never renders or never shows "Invia". */
+const TEST_STALL_TIMEOUT_MS = 30000;
 
 const notify = (title: string, message: string): void => {
   chrome.runtime
@@ -184,15 +202,152 @@ const pollUntilExpanded = (itemCountBefore: number): void => {
   window.setTimeout(tickIfPopulated, EXPAND_POLL_INTERVAL_MS);
 };
 
+const scheduleAdvance = (target: LessonItem): void => {
+  console.info(LOG_PREFIX, `advancing in ${NAVIGATION_DELAY_MS}ms → ${target.title}`);
+  schedule(() => {
+    state.pendingTimer = null;
+    const row = getRowElement(document, target);
+    if (!row) {
+      console.warn(LOG_PREFIX, 'target row not found:', target.title);
+      return;
+    }
+    if (target.kind === 'test') {
+      // The sidebar test row is not clickable itself — its "Esegui" button
+      // opens the quiz. No video to nudge afterwards.
+      clickElement(getTestRunButton(row) ?? row);
+      notify('Unipegaso AutoPlay', 'Apro il test di fine lezione…');
+      return;
+    }
+    clickElement(row);
+    ensureVideoPlaying();
+    notify('Unipegaso AutoPlay', `Prossima lezione: ${target.title}`);
+  }, NAVIGATION_DELAY_MS);
+};
+
+const expandNextAccordion = (page: LessonPage): void => {
+  const now = Date.now();
+  if (now - state.lastExpandAt < EXPAND_COOLDOWN_MS) return;
+  const [header] = findCollapsedLessonAccordions(document);
+  if (!header) {
+    console.warn(LOG_PREFIX, 'expand decision but no collapsed accordion found');
+    return;
+  }
+  state.lastExpandAt = now;
+  const itemCountBefore = page.items.length;
+  console.info(LOG_PREFIX, 'expanding next accordion →', describeElement(header), header);
+  clickElement(header);
+  pollUntilExpanded(itemCountBefore);
+};
+
+const quizKey = (item: LessonItem): string =>
+  `${item.accordionTitle ?? ''}::${item.title}::${item.index}`;
+
+const resetQuizRun = (): void => {
+  state.quizRun = null;
+};
+
+/**
+ * Drive one step of the quiz automation. Called from tick() while the
+ * current sidebar row is an uncompleted test and autoTest is on, so it runs
+ * repeatedly (MutationObserver + 1.5s interval) and must be idempotent:
+ * every call inspects the DOM and only acts when its phase's precondition
+ * holds.
+ */
+const handleRunTest = (page: LessonPage, current: LessonItem, currentIndex: number): void => {
+  const key = quizKey(current);
+  if (state.quizRun && state.quizRun.key !== key) resetQuizRun();
+  const now = Date.now();
+  if (!state.quizRun) {
+    // A pending advance scheduled before this run started (e.g. one that was
+    // about to click into this very test row) could otherwise fire mid-quiz
+    // and re-click "Esegui", wiping in-progress answers. Cancel it here, not
+    // unconditionally on every call — the 'submitted' phase below schedules
+    // its own legitimate advance via scheduleAdvance() and must not have it
+    // cancelled by later ticks of the same run.
+    clearPending();
+    state.lastTargetIndex = null;
+    state.quizRun = {
+      key,
+      phase: 'answering',
+      startedAt: now,
+      answeredAt: null,
+      submittedAt: null,
+    };
+    console.info(LOG_PREFIX, 'quiz run started for', current.title);
+  }
+  const run = state.quizRun;
+  const questions = scanQuiz(document);
+
+  // Safety valve: if the quiz never renders (test already passed, Esegui
+  // click missed…) or "Invia" never appears, fall back to the pre-feature
+  // behaviour and move on.
+  if (run.phase !== 'submitted' && now - run.startedAt > TEST_STALL_TIMEOUT_MS) {
+    console.warn(LOG_PREFIX, 'quiz stalled, skipping test', { phase: run.phase });
+    notify('Unipegaso AutoPlay', 'Test non completato: passo alla lezione successiva.');
+    run.phase = 'submitted';
+    run.submittedAt = now - TEST_SUBMIT_DELAY_MS;
+  }
+
+  if (run.phase === 'answering') {
+    if (questions.length === 0) return; // quiz still loading; next tick retries
+    for (const [qi, question] of questions.entries()) {
+      if (question.selectedIndex !== null || question.answers.length === 0) continue;
+      const pick = Math.floor(Math.random() * question.answers.length);
+      const el = getQuizAnswerElement(document, qi, pick);
+      if (el) clickElement(el);
+    }
+    run.phase = 'awaiting-invia';
+    run.answeredAt = now;
+    console.info(LOG_PREFIX, `quiz answered (${questions.length} questions)`);
+    return;
+  }
+
+  if (run.phase === 'awaiting-invia') {
+    if (now - (run.answeredAt ?? now) < TEST_ANSWER_SETTLE_MS) return;
+    const invia = findInviaButton(document);
+    if (!invia) {
+      // "Invia" only appears once every answer registered. Selection
+      // detection is best-effort (see quiz.ts), so re-answer anything that
+      // still reads as unselected and keep waiting.
+      if (questions.some((q) => q.selectedIndex === null)) {
+        run.phase = 'answering';
+      }
+      return;
+    }
+    clickElement(invia);
+    run.phase = 'submitted';
+    run.submittedAt = now;
+    notify('Unipegaso AutoPlay', 'Test di fine lezione inviato.');
+    return;
+  }
+
+  // phase === 'submitted': wait, then move to the next row ourselves — the
+  // sidebar row may keep isCurrent, so decide() would return run-test
+  // forever if we waited for it.
+  if (now - (run.submittedAt ?? now) < TEST_SUBMIT_DELAY_MS) return;
+  const target = findNextTarget(page, currentIndex, { autoTest: state.settings.autoTest });
+  if (target) {
+    if (state.pendingTimer !== null && state.lastTargetIndex === target.index) return;
+    state.lastTargetIndex = target.index;
+    scheduleAdvance(target);
+    return;
+  }
+  // Everything after the test lives in a collapsed accordion.
+  expandNextAccordion(page);
+};
+
 const tick = (): void => {
   if (!state.settings.enabled) return;
   if (!urlMatches()) return;
 
   const page = scanPage(document);
-  const decision = decide(page);
+  const decision = decide(page, { autoTest: state.settings.autoTest });
   const current = page.items.find((i) => i.isCurrent) ?? null;
   const currentIndex = page.items.findIndex((i) => i.isCurrent);
-  const peekTarget = currentIndex >= 0 ? (findNextTarget(page, currentIndex)?.title ?? null) : null;
+  const peekTarget =
+    currentIndex >= 0
+      ? (findNextTarget(page, currentIndex, { autoTest: state.settings.autoTest })?.title ?? null)
+      : null;
 
   logOnChange({
     ts: Date.now(),
@@ -209,23 +364,18 @@ const tick = (): void => {
     if (decision.reason === 'video-in-progress' || decision.reason === 'video-no-percentage') {
       state.lastObiettiviTitle = null;
       state.obiettiviFirstSeenAt = null;
+      state.quizRun = null;
     }
     return;
   }
 
   if (decision.action === 'expand') {
-    const now = Date.now();
-    if (now - state.lastExpandAt < EXPAND_COOLDOWN_MS) return;
-    const [header] = findCollapsedLessonAccordions(document);
-    if (!header) {
-      console.warn(LOG_PREFIX, 'expand decision but no collapsed accordion found');
-      return;
-    }
-    state.lastExpandAt = now;
-    const itemCountBefore = page.items.length;
-    console.info(LOG_PREFIX, 'expanding next accordion →', describeElement(header), header);
-    clickElement(header);
-    pollUntilExpanded(itemCountBefore);
+    expandNextAccordion(page);
+    return;
+  }
+
+  if (decision.action === 'run-test') {
+    handleRunTest(page, decision.current, decision.currentIndex);
     return;
   }
 
@@ -257,20 +407,7 @@ const tick = (): void => {
 
   if (state.pendingTimer !== null && state.lastTargetIndex === decision.target.index) return;
   state.lastTargetIndex = decision.target.index;
-
-  console.info(LOG_PREFIX, `advancing in ${NAVIGATION_DELAY_MS}ms → ${decision.target.title}`);
-
-  schedule(() => {
-    state.pendingTimer = null;
-    const row = getRowElement(document, decision.target);
-    if (!row) {
-      console.warn(LOG_PREFIX, 'target row not found:', decision.target.title);
-      return;
-    }
-    clickElement(row);
-    ensureVideoPlaying();
-    notify('Unipegaso AutoPlay', `Prossima lezione: ${decision.target.title}`);
-  }, NAVIGATION_DELAY_MS);
+  scheduleAdvance(decision.target);
 };
 
 let observer: MutationObserver | null = null;
@@ -299,6 +436,7 @@ const stop = (): void => {
   state.lastTargetIndex = null;
   state.lastObiettiviTitle = null;
   state.obiettiviFirstSeenAt = null;
+  state.quizRun = null;
   notify('Unipegaso AutoPlay', 'In pausa: avanzamento automatico disattivato.');
 };
 
@@ -365,11 +503,13 @@ interface DebugHook {
   decide: () => ReturnType<typeof decide>;
   state: () => ControllerState;
   tick: () => void;
+  scanQuiz: () => ReturnType<typeof scanQuiz>;
 }
 const debugHook: DebugHook = {
   scan: () => scanPage(document),
-  decide: () => decide(scanPage(document)),
+  decide: () => decide(scanPage(document), { autoTest: state.settings.autoTest }),
   state: () => state,
   tick,
+  scanQuiz: () => scanQuiz(document),
 };
 (window as unknown as { __unipegasoAutoplay: DebugHook }).__unipegasoAutoplay = debugHook;

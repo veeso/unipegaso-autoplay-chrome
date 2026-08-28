@@ -54,9 +54,11 @@ const init = async (): Promise<void> => {
   const activeUrl = await getActiveTabUrl();
   const toggle = requireElement<HTMLInputElement>('#toggle');
   const fast = requireElement<HTMLInputElement>('#fast');
+  const autotest = requireElement<HTMLInputElement>('#autotest');
 
   toggle.checked = settings.enabled;
   fast.checked = settings.fastAdvance;
+  autotest.checked = settings.autoTest;
   renderStatus(computeState(settings.enabled, activeUrl));
 
   const persist = (): void => {
@@ -71,6 +73,11 @@ const init = async (): Promise<void> => {
 
   fast.addEventListener('change', () => {
     settings = { ...settings, fastAdvance: fast.checked };
+    persist();
+  });
+
+  autotest.addEventListener('change', () => {
+    settings = { ...settings, autoTest: autotest.checked };
     persist();
   });
 };

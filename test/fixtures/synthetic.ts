@@ -5,6 +5,7 @@ export const makeItem = (overrides: Partial<LessonItem> = {}): LessonItem => ({
   kind: 'video',
   percentage: 0,
   status: 'todo',
+  completed: false,
   isCurrent: false,
   skip: false,
   clickable: true,
